@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rumuruti Properties Ltd</title>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getDatabase, ref, push, set, onValue, query, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
+import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-storage.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyDoHxzjea8qG8nTcUAQCLzsJ2Pt_m-xB8E",
+  authDomain: "rumuruti-properties--ltd.firebaseapp.com",
+  databaseURL: "https://rumuruti-properties--ltd-default-rtdb.firebaseio.com",
+  projectId: "rumuruti-properties--ltd",
+  storageBucket: "rumuruti-properties--ltd.appspot.com",
+  messagingSenderId: "1055701489042",
+  appId: "1:1055701489042:web:109918d704c88c02a89d4b",
+  measurementId: "G-5FN1LXBD2P"
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const auth = getAuth(app);
+const storage = getStorage(app);
+
+let currentUser, currentRole, currentCategory='Land';
+
+// SCREEN SWITCH
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.style.display='none');
+  document.getElementById(id).style.display='flex';
+}
+window.showScreen = showScreen;
+
+// OTP
+window.sendOTP = () => {
+  const phone = phoneNumber.value;
+  window.recaptchaVerifier = new RecaptchaVerifier('recaptcha-container', {}, auth);
+  signInWithPhoneNumber(auth, phone, window.recaptchaVerifier)
+  .then(r => { window.confirmationResult=r; showScreen('otpScreen'); })
+  .catch(e => alert(e.message));
+};
+
+window.verifyOTP = () => {
+  confirmationResult.confirm(otpCode.value)
+  .then(r => { currentUser=r.user; showScreen('roleScreen'); })
+  .catch(()=>alert('Wrong OTP'));
+};
+
+// ROLE
+window.setRole = (role)=>{
+  currentRole=role;
+  set(ref(db,'users/'+currentUser.uid),{role});
+  showScreen('mainScreen');
+  loadProperties(role,'Land');
+};
+
+// POST PROPERTY WITH IMAGE
+window.postProperty = async ()=>{
+  const file = image.files[0];
+  if(!file){ alert("Select image"); return; }
+
+  const imgRef = sRef(storage, 'images/'+Date.now());
+  await uploadBytes(imgRef,file);
+  const imageURL = await getDownloadURL(imgRef);
+
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const coords = pos.coords.latitude+","+pos.coords.longitude;
+
+    const propertyRef = push(ref(db,'properties'));
+    await set(propertyRef,{
+      title: title.value,
+      description: description.value,
+      price: price.value,
+      contact: contact.value,
+      category: categorySelect.value,
+      location: coords,
+      image: imageURL
+    });
+
+    alert("Posted!");
+    loadProperties(currentRole,categorySelect.value);
+  });
+};
+
+// LOAD PROPERTIES (WITH IMAGES)
+window.loadProperties = (role,category)=>{
+  currentCategory=category;
+  const list = propertiesList;
+  list.innerHTML='';
+
+  const q = query(ref(db,'properties'),orderByChild('category'),equalTo(category));
+  onValue(q,snap=>{
+    list.innerHTML='';
+    snap.forEach(child=>{
+      const p=child.val();
+
+      const div=document.createElement('div');
+      div.className='card';
+
+      div.innerHTML=`
+        <img src="${p.image}" class="thumb">
+        <h3>${p.title}</h3>
+        <p>${p.description}</p>
+        <p><b>KES ${p.price}</b></p>
+        <p>${p.location}</p>
+        <button onclick="openModal('${child.key}')">View</button>
+      `;
+      list.appendChild(div);
+    });
+  });
+};
+
+// MODAL
+window.openModal = (id)=>{
+  const modal=document.getElementById('modal');
+  onValue(ref(db,'properties/'+id),(snap)=>{
+    const p=snap.val();
+    modal.innerHTML=`
+      <h2>${p.title}</h2>
+      <img src="${p.image}" style="width:100%">
+      <p>${p.description}</p>
+      <p>KES ${p.price}</p>
+      <p>${p.location}</p>
+      <p>${p.contact}</p>
+      <textarea id="msg"></textarea>
+      <button onclick="sendMsg('${id}')">Send</button>
+      <button onclick="closeModal()">Close</button>
+    `;
+  });
+  modal.style.display='block';
+};
+
+window.closeModal=()=>modal.style.display='none';
+
+// MESSAGE
+window.sendMsg=(id)=>{
+  const text = msg.value + "\n\nThank you for your enquiry!";
+  push(ref(db,'messages/'+id),{text});
+  alert("Sent!");
+};
+
+</script>
+
+<style>
+body{font-family:sans-serif;margin:0;}
+.screen{display:none;flex-direction:column;align-items:center;padding:20px;}
+.card{background:#fff;margin:10px;padding:10px;border-radius:10px;width:90%;max-width:300px;box-shadow:0 2px 5px rgba(0,0,0,0.2);}
+.thumb{width:100%;height:150px;object-fit:cover;border-radius:10px;}
+#propertiesList{display:flex;flex-wrap:wrap;justify-content:center;}
+#modal{display:none;position:fixed;top:10%;left:50%;transform:translateX(-50%);background:white;padding:20px;width:90%;max-width:400px;}
+</style>
+</head>
+
+<body>
+
+<!-- WELCOME -->
+<div id="welcomeScreen" class="screen">
+<h1>Welcome</h1>
+<input id="phoneNumber" placeholder="+2547...">
+<div id="recaptcha-container"></div>
+<button onclick="sendOTP()">Send OTP</button>
+</div>
+
+<!-- OTP -->
+<div id="otpScreen" class="screen">
+<input id="otpCode" placeholder="OTP">
+<button onclick="verifyOTP()">Verify</button>
+</div>
+
+<!-- ROLE -->
+<div id="roleScreen" class="screen">
+<button onclick="setRole('Seller')">Seller</button>
+<button onclick="setRole('Buyer')">Buyer</button>
+</div>
+
+<!-- MAIN -->
+<div id="mainScreen" class="screen">
+
+<h2>Post Property</h2>
+<input id="title" placeholder="Title">
+<textarea id="description"></textarea>
+<input id="price" placeholder="Price">
+<input id="contact" placeholder="Contact">
+<select id="categorySelect">
+<option>Land</option>
+<option>Cars</option>
+<option>Houses</option>
+</select>
+<input type="file" id="image">
+<button onclick="postProperty()">Post</button>
+
+<h2>Listings</h2>
+<div id="propertiesList"></div>
+
+</div>
+
+<div id="modal"></div>
+
+</body>
+</html>
